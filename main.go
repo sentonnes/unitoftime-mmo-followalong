@@ -36,32 +36,36 @@ func runGame() {
 func runGameLoop() {
 	spritesheet, err := load.Spritesheet(packedJson)
 
-	manSprite, err := spritesheet.Get(purpleGemPng)
+	purpleGemSprite, err := spritesheet.Get(purpleGemPng)
 	if err != nil {
 		return
 	}
-	purpleGem := window.Bounds().Center()
+	purpleGemPosition := window.Bounds().Center()
+
+	redGemSprite, err := spritesheet.Get(redGemPng)
+	if err != nil {
+		return
+	}
+	redGemPosition := window.Bounds().Center()
+
+	people := make([]Person, 0)
+	newPerson := NewPerson(purpleGemSprite, purpleGemPosition, Keybinds{Up: pixelgl.KeyUp, Down: pixelgl.KeyDown, Left: pixelgl.KeyLeft, Right: pixelgl.KeyRight})
+	people = append(people, newPerson)
+	newPerson = NewPerson(redGemSprite, redGemPosition, Keybinds{Up: pixelgl.KeyW, Down: pixelgl.KeyS, Left: pixelgl.KeyA, Right: pixelgl.KeyD})
+	people = append(people, newPerson)
 
 	for !window.JustPressed(pixelgl.KeyEscape) {
 		window.Clear(pixel.RGB(0, 0, 0))
 
-		if window.Pressed(pixelgl.KeyLeft) {
-			purpleGem.X -= 2.0
+		for i := range people {
+			people[i].HandleInput(window)
 		}
 
-		if window.Pressed(pixelgl.KeyRight) {
-			purpleGem.X += 2.0
-		}
+		// <- Collision Detection
 
-		if window.Pressed(pixelgl.KeyUp) {
-			purpleGem.Y += 2.0
+		for i := range people {
+			people[i].Draw(window)
 		}
-
-		if window.Pressed(pixelgl.KeyDown) {
-			purpleGem.Y -= 2.0
-		}
-
-		manSprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 0.1).Moved(purpleGem))
 
 		window.Update()
 	}
