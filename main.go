@@ -1,60 +1,81 @@
 package main
 
+//go:generate packer --input images --stats
+
 import (
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
-	"gommo/sprite"
+	"gommo/engine/asset"
 	_ "image/png"
+	"os"
 )
 
 func main() {
 	pixelgl.Run(runGame)
 }
 
-const windowsMaxX = 1024
-const windowsMaxY = 768
-const windowsName = "MMO"
-const windowsVSync = true
-const windowsResizable = true
+const (
+	windowsMaxX      = 1024
+	windowsMaxY      = 768
+	windowsName      = "MMO"
+	windowsVSync     = true
+	windowsResizable = true
+	meatPng          = "meat.png"
+	packedJson       = "packed.json"
+)
+
+var load *asset.Load
+var window *pixelgl.Window
 
 func runGame() {
-	window := setupGame()
-	runGameLoop(window)
+	setupGame()
+	runGameLoop()
 }
 
-func runGameLoop(win *pixelgl.Window) {
-	manSprite, err := sprite.MeatSprite()
+func runGameLoop() {
+	spritesheet, err := load.Spritesheet(packedJson)
+
+	manSprite, err := spritesheet.Get(meatPng)
 	if err != nil {
-		panic(err)
+		return
 	}
-	manPosition := win.Bounds().Center()
+	manPosition := window.Bounds().Center()
 
-	for !win.JustPressed(pixelgl.KeyEscape) {
-		win.Clear(pixel.RGB(0, 0, 0))
+	for !window.JustPressed(pixelgl.KeyEscape) {
+		window.Clear(pixel.RGB(0, 0, 0))
 
-		if win.Pressed(pixelgl.KeyLeft) {
+		if window.Pressed(pixelgl.KeyLeft) {
 			manPosition.X -= 2.0
 		}
 
-		if win.Pressed(pixelgl.KeyRight) {
+		if window.Pressed(pixelgl.KeyRight) {
 			manPosition.X += 2.0
 		}
 
-		if win.Pressed(pixelgl.KeyUp) {
+		if window.Pressed(pixelgl.KeyUp) {
 			manPosition.Y += 2.0
 		}
 
-		if win.Pressed(pixelgl.KeyDown) {
+		if window.Pressed(pixelgl.KeyDown) {
 			manPosition.Y -= 2.0
 		}
 
-		manSprite.Draw(win, pixel.IM.Scaled(pixel.ZV, 2.0).Moved(manPosition))
+		manSprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 2.0).Moved(manPosition))
 
-		win.Update()
+		window.Update()
 	}
 }
 
-func setupGame() *pixelgl.Window {
+func setupGame() {
+	setupLoad()
+	setupWindow()
+}
+
+func setupLoad() {
+	load = asset.NewLoad(os.DirFS("./"))
+}
+
+func setupWindow() {
 	cfg := getWindowsConfig()
 
 	win, err := pixelgl.NewWindow(cfg)
@@ -63,7 +84,7 @@ func setupGame() *pixelgl.Window {
 	}
 
 	win.SetSmooth(false)
-	return win
+	window = win
 }
 
 func getWindowsConfig() pixelgl.WindowConfig {
