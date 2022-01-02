@@ -20,7 +20,8 @@ const (
 	windowsName      = "MMO"
 	windowsVSync     = true
 	windowsResizable = true
-	meatPng          = "meat.png"
+	purpleGemPng     = "purple.png"
+	redGemPng        = "red.png"
 	packedJson       = "packed.json"
 )
 
@@ -35,32 +36,32 @@ func runGame() {
 func runGameLoop() {
 	spritesheet, err := load.Spritesheet(packedJson)
 
-	manSprite, err := spritesheet.Get(meatPng)
+	manSprite, err := spritesheet.Get(purpleGemPng)
 	if err != nil {
 		return
 	}
-	manPosition := window.Bounds().Center()
+	purpleGem := window.Bounds().Center()
 
 	for !window.JustPressed(pixelgl.KeyEscape) {
 		window.Clear(pixel.RGB(0, 0, 0))
 
 		if window.Pressed(pixelgl.KeyLeft) {
-			manPosition.X -= 2.0
+			purpleGem.X -= 2.0
 		}
 
 		if window.Pressed(pixelgl.KeyRight) {
-			manPosition.X += 2.0
+			purpleGem.X += 2.0
 		}
 
 		if window.Pressed(pixelgl.KeyUp) {
-			manPosition.Y += 2.0
+			purpleGem.Y += 2.0
 		}
 
 		if window.Pressed(pixelgl.KeyDown) {
-			manPosition.Y -= 2.0
+			purpleGem.Y -= 2.0
 		}
 
-		manSprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 2.0).Moved(manPosition))
+		manSprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 0.1).Moved(purpleGem))
 
 		window.Update()
 	}
