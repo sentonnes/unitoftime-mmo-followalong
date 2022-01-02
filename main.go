@@ -6,6 +6,7 @@ import (
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
 	"gommo/engine/asset"
+	"gommo/engine/render"
 	_ "image/png"
 	"os"
 )
@@ -54,18 +55,29 @@ func runGameLoop() {
 	newPerson = NewPerson(redGemSprite, redGemPosition, Keybinds{Up: pixelgl.KeyW, Down: pixelgl.KeyS, Left: pixelgl.KeyA, Right: pixelgl.KeyD})
 	people = append(people, newPerson)
 
+	camera := render.NewCamera(window, 0, 0)
+	zoomSpeed := 0.1
+
 	for !window.JustPressed(pixelgl.KeyEscape) {
 		window.Clear(pixel.RGB(0, 0, 0))
+
+		scroll := window.MouseScroll()
+		if scroll.Y != 0 {
+			camera.Zoom += zoomSpeed * scroll.Y
+		}
 
 		for i := range people {
 			people[i].HandleInput(window)
 		}
 
-		// <- Collision Detection
+		camera.Position = people[0].Position
+		camera.Update()
 
+		window.SetMatrix(camera.Matrix())
 		for i := range people {
 			people[i].Draw(window)
 		}
+		window.SetMatrix(pixel.IM)
 
 		window.Update()
 	}
