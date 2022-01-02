@@ -7,6 +7,7 @@ import (
 	"github.com/faiface/pixel/pixelgl"
 	"gommo/engine/asset"
 	"gommo/engine/render"
+	"gommo/engine/tilemap"
 	_ "image/png"
 	"os"
 )
@@ -55,6 +56,24 @@ func runGameLoop() {
 	newPerson = NewPerson(redGemSprite, redGemPosition, Keybinds{Up: pixelgl.KeyW, Down: pixelgl.KeyS, Left: pixelgl.KeyA, Right: pixelgl.KeyD})
 	people = append(people, newPerson)
 
+	tileSize := 72
+	mapSize := 1000
+	tiles := make([][]tilemap.Tile, mapSize)
+	tileSprite, err := spritesheet.Get("tile.png")
+	if err != nil {
+		return
+	}
+	for x := range tiles {
+		tiles[x] = make([]tilemap.Tile, mapSize)
+		for y := range tiles[x] {
+			tiles[x][y] = tilemap.Tile{0, tileSprite}
+		}
+	}
+
+	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet.Picture())
+	tmap := tilemap.New(tiles, batch, tileSize)
+	tmap.Rebatch()
+
 	camera := render.NewCamera(window, 0, 0)
 	zoomSpeed := 0.1
 
@@ -74,6 +93,7 @@ func runGameLoop() {
 		camera.Update()
 
 		window.SetMatrix(camera.Matrix())
+		tmap.Draw(window)
 		for i := range people {
 			people[i].Draw(window)
 		}
