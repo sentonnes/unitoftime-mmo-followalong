@@ -3,10 +3,8 @@ package main
 import (
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
-	"image"
+	"gommo/sprite"
 	_ "image/png"
-	"os"
-	"path"
 )
 
 func main() {
@@ -18,7 +16,6 @@ const windowsMaxY = 768
 const windowsName = "MMO"
 const windowsVSync = true
 const windowsResizable = true
-const sprite = "meat.PNG"
 
 func runGame() {
 	window := setupGame()
@@ -26,7 +23,7 @@ func runGame() {
 }
 
 func runGameLoop(win *pixelgl.Window) {
-	manSprite, err := getManSprite()
+	manSprite, err := sprite.MeatSprite()
 	if err != nil {
 		panic(err)
 	}
@@ -57,15 +54,6 @@ func runGameLoop(win *pixelgl.Window) {
 	}
 }
 
-func getManSprite() (*pixel.Sprite, error) {
-	sprite, err := getSprite(path.Join("./pngs", sprite))
-	if err != nil {
-		return nil, err
-	}
-
-	return sprite, nil
-}
-
 func setupGame() *pixelgl.Window {
 	cfg := getWindowsConfig()
 
@@ -86,21 +74,4 @@ func getWindowsConfig() pixelgl.WindowConfig {
 		Resizable: windowsResizable,
 	}
 	return cfg
-}
-
-func getSprite(path string) (*pixel.Sprite, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	img, _, err := image.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-
-	pic := pixel.PictureDataFromImage(img)
-
-	return pixel.NewSprite(pic, pic.Bounds()), nil
 }
