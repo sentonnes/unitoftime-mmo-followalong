@@ -6,13 +6,13 @@ import (
 	"context"
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
+	mmo "gommo"
 	"gommo/engine/asset"
-	"gommo/engine/proceduralgeneration"
+	"gommo/engine/ecs"
 	"gommo/engine/render"
 	"gommo/engine/tilemap"
 	_ "image/png"
 	"log"
-	"math"
 	"nhooyr.io/websocket"
 	"os"
 	"time"
@@ -66,14 +66,14 @@ const (
 	grassPng         = "grass.png"
 	tileSize         = 16
 	mapSize          = 1000
-	exponent         = 0.8
-	islandExponent   = 2.0
 )
 
 var seed = int64(12345)
 
 var load *asset.Load
 var window *pixelgl.Window
+var engine *ecs.Engine
+var playerId ecs.Id
 
 func runGame() {
 	setupGame()
@@ -85,16 +85,16 @@ func runGameLoop() {
 	check(err)
 	tmap := createTileMap(spritesheet)
 	spawnPoint := createSpawnPoint()
-	people := createPeople(spritesheet, spawnPoint)
+	createPeople(spritesheet, spawnPoint)
 	camera, zoomSpeed := createCamera()
-	gameLoop(camera, zoomSpeed, people, tmap)
+	gameLoop(camera, zoomSpeed, tmap)
 }
 
-func createSpawnPoint() pixel.Vec {
-	return pixel.V(float64((tileSize*mapSize)/2), float64((tileSize*mapSize)/2))
+func createSpawnPoint() Transform {
+	return Transform{float64((tileSize * mapSize) / 2), float64((tileSize * mapSize) / 2)}
 }
 
-func gameLoop(camera *render.Camera, zoomSpeed float64, people []Person, tmap *tilemap.Tilemap) {
+func gameLoop(camera *render.Camera, zoomSpeed float64, tmapRender *render.TilemapRender) {
 	for !window.JustPressed(pixelgl.KeyEscape) {
 		window.Clear(pixel.RGB(0, 0, 0))
 
@@ -103,70 +103,42 @@ func gameLoop(camera *render.Camera, zoomSpeed float64, people []Person, tmap *t
 			camera.Zoom += zoomSpeed * scroll.Y
 		}
 
-		for i := range people {
-			people[i].HandleInput(window)
-		}
+		HandleInput(window, engine)
 
-		camera.Position = people[0].Position
+		transform := Transform{}
+		ok := ecs.Read(engine, playerId, &transform)
+		if ok {
+			camera.Position = pixel.V(transform.X, transform.Y)
+		}
 		camera.Update()
 
 		window.SetMatrix(camera.Matrix())
-		tmap.Draw(window)
-		for i := range people {
-			people[i].Draw(window)
-		}
+		tmapRender.Draw(window)
+
+		DrawSprite(window, engine)
+
 		window.SetMatrix(pixel.IM)
 
 		window.Update()
 	}
 }
 
-func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
-	octaves := []proceduralgeneration.Octave{
-		{Frequency: 0.02, Scale: 0.6},
-		{Frequency: 0.05, Scale: 0.3},
-		{Frequency: 0.1, Scale: 0.07},
-		{Frequency: 0.2, Scale: 0.02},
-		{Frequency: 0.4, Scale: 0.01},
-	}
-	terrain := proceduralgeneration.NewNoiseMap(seed, octaves, exponent)
+func createTileMap(spritesheet *asset.Spritesheet) *render.TilemapRender {
+	grassTile, err := spritesheet.Get(grassPng)
+	check(err)
+	sandTile, err := spritesheet.Get(sandPng)
+	check(err)
+	waterTile, err := spritesheet.Get(waterPng)
+	check(err)
 
-	tiles := make([][]tilemap.Tile, mapSize)
-	for x := range tiles {
-		tiles[x] = make([]tilemap.Tile, mapSize)
-		for y := range tiles[x] {
-			height := terrain.Get(x, y)
-
-			height = modifyHeightForIsland(height, x, y)
-
-			var tileType tilemap.TileType
-			const waterLevel = 0.5
-			const sandLevel = waterLevel + 0.1
-			if height < waterLevel {
-				tileType = WaterTile
-			} else if height < sandLevel {
-				tileType = SandTile
-			} else {
-				tileType = GrassTile
-			}
-
-			tiles[x][y] = GetTile(spritesheet, tileType)
-		}
-	}
-
-	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet.Picture())
-	tmap := tilemap.New(tiles, batch, tileSize)
-	tmap.Rebatch()
-	return tmap
-}
-
-func modifyHeightForIsland(height float64, x int, y int) float64 {
-	dx := float64(x)/float64(mapSize) - 0.5
-	dy := float64(y)/float64(mapSize) - 0.5
-	d := math.Sqrt(dx*dx+dy*dy) * 2
-	d = math.Pow(d, islandExponent)
-	height = (1 - d + height) / 2
-	return height
+	tmap := mmo.CreateTilemap(seed, mapSize, tileSize)
+	tmapRender := render.NewTilemapRender(spritesheet, map[tilemap.TileType]*pixel.Sprite{
+		mmo.GrassTile: grassTile,
+		mmo.SandTile:  sandTile,
+		mmo.WaterTile: waterTile,
+	})
+	tmapRender.Batch(tmap)
+	return tmapRender
 }
 
 func createCamera() (*render.Camera, float64) {
@@ -175,23 +147,33 @@ func createCamera() (*render.Camera, float64) {
 	return camera, zoomSpeed
 }
 
-func createPeople(spritesheet *asset.Spritesheet, spawnPoint pixel.Vec) []Person {
+func createPeople(spritesheet *asset.Spritesheet, spawnPoint Transform) {
 	var purpleGemSprite, err = spritesheet.Get(purpleGemPng)
 	check(err)
 	redGemSprite, err := spritesheet.Get(redGemPng)
 	check(err)
 
-	people := make([]Person, 0)
-	newPerson := NewPerson(purpleGemSprite, spawnPoint, ArrowKeybinds, 20)
-	people = append(people, newPerson)
-	newPerson = NewPerson(redGemSprite, spawnPoint, AWSDKeybinds, 4)
-	people = append(people, newPerson)
-	return people
+	purpleGemId := engine.NewId()
+	ecs.Write(engine, purpleGemId, Sprite{purpleGemSprite})
+	ecs.Write(engine, purpleGemId, spawnPoint)
+	ecs.Write(engine, purpleGemId, AWSDKeybinds)
+
+	playerId = purpleGemId
+
+	redGemId := engine.NewId()
+	ecs.Write(engine, redGemId, Sprite{redGemSprite})
+	ecs.Write(engine, redGemId, spawnPoint)
+	ecs.Write(engine, redGemId, ArrowKeybinds)
 }
 
 func setupGame() {
 	setupLoad()
+	setupEngine()
 	setupWindow()
+}
+
+func setupEngine() {
+	engine = ecs.NewEngine()
 }
 
 func setupLoad() {
@@ -218,31 +200,44 @@ func getWindowsConfig() pixelgl.WindowConfig {
 	return cfg
 }
 
-const (
-	GrassTile tilemap.TileType = iota
-	SandTile
-	WaterTile
-)
+func DrawSprite(window *pixelgl.Window, engine *ecs.Engine) {
+	ecs.Each(engine, Sprite{}, func(id ecs.Id, a interface{}) {
+		sprite := a.(Sprite)
 
-func GetTile(spritesheet *asset.Spritesheet, tileType tilemap.TileType) tilemap.Tile {
-	var spriteName string
+		transform := Transform{}
+		ok := ecs.Read(engine, id, &transform)
+		if !ok {
+			return
+		}
 
-	switch tileType {
-	case GrassTile:
-		spriteName = grassPng
-	case SandTile:
-		spriteName = sandPng
-	case WaterTile:
-		spriteName = waterPng
-	default:
-		panic("unknown TileType")
-	}
+		position := pixel.V(transform.X, transform.Y)
+		sprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 2.0).Moved(position))
+	})
+}
 
-	sprite, err := spritesheet.Get(spriteName)
-	check(err)
+func HandleInput(window *pixelgl.Window, engine *ecs.Engine) {
+	ecs.Each(engine, Keybinds{}, func(id ecs.Id, a interface{}) {
+		keybinds := a.(Keybinds)
 
-	return tilemap.Tile{
-		Type:   tileType,
-		Sprite: sprite,
-	}
+		transform := Transform{}
+		ok := ecs.Read(engine, id, &transform)
+		if !ok {
+			return
+		}
+
+		if window.Pressed(keybinds.Left) {
+			transform.X -= 2.0
+		}
+		if window.Pressed(keybinds.Right) {
+			transform.X += 2.0
+		}
+		if window.Pressed(keybinds.Up) {
+			transform.Y += 2.0
+		}
+		if window.Pressed(keybinds.Down) {
+			transform.Y -= 2.0
+		}
+
+		ecs.Write(engine, id, transform)
+	})
 }
