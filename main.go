@@ -6,14 +6,22 @@ import (
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
 	"gommo/engine/asset"
+	"gommo/engine/proceduralgeneration"
 	"gommo/engine/render"
 	"gommo/engine/tilemap"
 	_ "image/png"
 	"os"
+	"time"
 )
 
 func main() {
 	pixelgl.Run(runGame)
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 const (
@@ -25,7 +33,15 @@ const (
 	purpleGemPng     = "purple.png"
 	redGemPng        = "red.png"
 	packedJson       = "packed.json"
+	waterPng         = "water.png"
+	sandPng          = "sand.png"
+	grassPng         = "grass.png"
+	tileSize         = 256
+	mapSize          = 100
+	exponent         = 1.0
 )
+
+var seed = time.Now().UTC().UnixNano()
 
 var load *asset.Load
 var window *pixelgl.Window
@@ -37,46 +53,19 @@ func runGame() {
 
 func runGameLoop() {
 	spritesheet, err := load.Spritesheet(packedJson)
+	check(err)
+	tmap := createTileMap(spritesheet)
+	spawnPoint := createSpawnPoint()
+	people := createPeople(spritesheet, spawnPoint)
+	camera, zoomSpeed := createCamera()
+	gameLoop(camera, zoomSpeed, people, tmap)
+}
 
-	purpleGemSprite, err := spritesheet.Get(purpleGemPng)
-	if err != nil {
-		return
-	}
-	purpleGemPosition := window.Bounds().Center()
+func createSpawnPoint() pixel.Vec {
+	return pixel.V(float64((tileSize*mapSize)/2), float64((tileSize*mapSize)/2))
+}
 
-	redGemSprite, err := spritesheet.Get(redGemPng)
-	if err != nil {
-		return
-	}
-	redGemPosition := window.Bounds().Center()
-
-	people := make([]Person, 0)
-	newPerson := NewPerson(purpleGemSprite, purpleGemPosition, Keybinds{Up: pixelgl.KeyUp, Down: pixelgl.KeyDown, Left: pixelgl.KeyLeft, Right: pixelgl.KeyRight})
-	people = append(people, newPerson)
-	newPerson = NewPerson(redGemSprite, redGemPosition, Keybinds{Up: pixelgl.KeyW, Down: pixelgl.KeyS, Left: pixelgl.KeyA, Right: pixelgl.KeyD})
-	people = append(people, newPerson)
-
-	tileSize := 72
-	mapSize := 1000
-	tiles := make([][]tilemap.Tile, mapSize)
-	tileSprite, err := spritesheet.Get("tile.png")
-	if err != nil {
-		return
-	}
-	for x := range tiles {
-		tiles[x] = make([]tilemap.Tile, mapSize)
-		for y := range tiles[x] {
-			tiles[x][y] = tilemap.Tile{0, tileSprite}
-		}
-	}
-
-	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet.Picture())
-	tmap := tilemap.New(tiles, batch, tileSize)
-	tmap.Rebatch()
-
-	camera := render.NewCamera(window, 0, 0)
-	zoomSpeed := 0.1
-
+func gameLoop(camera *render.Camera, zoomSpeed float64, people []Person, tmap *tilemap.Tilemap) {
 	for !window.JustPressed(pixelgl.KeyEscape) {
 		window.Clear(pixel.RGB(0, 0, 0))
 
@@ -103,6 +92,56 @@ func runGameLoop() {
 	}
 }
 
+func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
+	terrain := proceduralgeneration.NewNoiseMap(seed, exponent)
+
+	tiles := make([][]tilemap.Tile, mapSize)
+	for x := range tiles {
+		tiles[x] = make([]tilemap.Tile, mapSize)
+		for y := range tiles[x] {
+			height := terrain.Get(x, y)
+
+			var tileType tilemap.TileType
+			const waterLevel = 0.5
+			const sandLevel = waterLevel + .1
+			if height < waterLevel {
+				tileType = WaterTile
+			} else if height < sandLevel {
+				tileType = SandTile
+			} else {
+				tileType = GrassTile
+			}
+
+			tiles[x][y] = GetTile(spritesheet, tileType)
+		}
+	}
+
+	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet.Picture())
+	tmap := tilemap.New(tiles, batch, tileSize)
+	tmap.Rebatch()
+	return tmap
+}
+
+func createCamera() (*render.Camera, float64) {
+	camera := render.NewCamera(window, 0, 0)
+	zoomSpeed := 0.1
+	return camera, zoomSpeed
+}
+
+func createPeople(spritesheet *asset.Spritesheet, spawnPoint pixel.Vec) []Person {
+	var purpleGemSprite, err = spritesheet.Get(purpleGemPng)
+	check(err)
+	redGemSprite, err := spritesheet.Get(redGemPng)
+	check(err)
+
+	people := make([]Person, 0)
+	newPerson := NewPerson(purpleGemSprite, spawnPoint, ArrowKeybinds, 20)
+	people = append(people, newPerson)
+	newPerson = NewPerson(redGemSprite, spawnPoint, AWSDKeybinds, 4)
+	people = append(people, newPerson)
+	return people
+}
+
 func setupGame() {
 	setupLoad()
 	setupWindow()
@@ -116,9 +155,7 @@ func setupWindow() {
 	cfg := getWindowsConfig()
 
 	win, err := pixelgl.NewWindow(cfg)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 
 	win.SetSmooth(false)
 	window = win
@@ -132,4 +169,33 @@ func getWindowsConfig() pixelgl.WindowConfig {
 		Resizable: windowsResizable,
 	}
 	return cfg
+}
+
+const (
+	GrassTile tilemap.TileType = iota
+	SandTile
+	WaterTile
+)
+
+func GetTile(spritesheet *asset.Spritesheet, tileType tilemap.TileType) tilemap.Tile {
+	var spriteName string
+
+	switch tileType {
+	case GrassTile:
+		spriteName = grassPng
+	case SandTile:
+		spriteName = sandPng
+	case WaterTile:
+		spriteName = waterPng
+	default:
+		panic("unknown TileType")
+	}
+
+	sprite, err := spritesheet.Get(spriteName)
+	check(err)
+
+	return tilemap.Tile{
+		Type:   tileType,
+		Sprite: sprite,
+	}
 }

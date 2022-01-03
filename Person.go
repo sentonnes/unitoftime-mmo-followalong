@@ -6,30 +6,31 @@ import (
 )
 
 type Person struct {
-	Sprite   *pixel.Sprite
-	Position pixel.Vec
-	Keybinds Keybinds
+	Sprite        *pixel.Sprite
+	Position      pixel.Vec
+	Keybinds      Keybinds
+	MovementSpeed float64
 }
 
-func NewPerson(sprite *pixel.Sprite, position pixel.Vec, keybinds Keybinds) Person {
-	return Person{sprite, position, keybinds}
+func NewPerson(sprite *pixel.Sprite, position pixel.Vec, keybinds Keybinds, movementSpeed float64) Person {
+	return Person{sprite, position, keybinds, movementSpeed}
 }
 
 func (person *Person) Draw(window *pixelgl.Window) {
-	person.Sprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 0.1).Moved(person.Position))
+	person.Sprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 1).Moved(person.Position))
 }
 
 func (person *Person) HandleInput(window *pixelgl.Window) {
 	if window.Pressed(person.Keybinds.Left) {
-		person.Position.X -= 2.0
+		person.Position.X -= person.MovementSpeed
 	}
 	if window.Pressed(person.Keybinds.Right) {
-		person.Position.X += 2.0
+		person.Position.X += person.MovementSpeed
 	}
 	if window.Pressed(person.Keybinds.Up) {
-		person.Position.Y += 2.0
+		person.Position.Y += person.MovementSpeed
 	}
 	if window.Pressed(person.Keybinds.Down) {
-		person.Position.Y -= 2.0
+		person.Position.Y -= person.MovementSpeed
 	}
 }
