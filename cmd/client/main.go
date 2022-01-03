@@ -3,6 +3,7 @@ package main
 //go:generate packer --input images --stats
 
 import (
+	"context"
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/pixelgl"
 	"gommo/engine/asset"
@@ -10,11 +11,38 @@ import (
 	"gommo/engine/render"
 	"gommo/engine/tilemap"
 	_ "image/png"
+	"log"
 	"math"
+	"nhooyr.io/websocket"
 	"os"
+	"time"
 )
 
 func main() {
+	url := "ws://localhost:8000"
+	ctx := context.Background()
+	c, resp, err := websocket.Dial(ctx, url, nil)
+	check(err)
+
+	log.Println("Connection Response:", resp)
+
+	conn := websocket.NetConn(ctx, c, websocket.MessageBinary)
+
+	go func() {
+		counter := byte(0)
+		for {
+			time.Sleep(1 * time.Second)
+			n, err := conn.Write([]byte{counter})
+			if err != nil {
+				log.Println("error sending:", err)
+				return
+			}
+
+			log.Println("sent n bytes: ", n)
+			counter++
+		}
+	}()
+
 	pixelgl.Run(runGame)
 }
 
@@ -95,11 +123,11 @@ func gameLoop(camera *render.Camera, zoomSpeed float64, people []Person, tmap *t
 
 func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
 	octaves := []proceduralgeneration.Octave{
-		{0.02, 0.6},
-		{0.05, 0.3},
-		{0.1, 0.07},
-		{0.2, 0.02},
-		{0.4, 0.01},
+		{Frequency: 0.02, Scale: 0.6},
+		{Frequency: 0.05, Scale: 0.3},
+		{Frequency: 0.1, Scale: 0.07},
+		{Frequency: 0.2, Scale: 0.02},
+		{Frequency: 0.4, Scale: 0.01},
 	}
 	terrain := proceduralgeneration.NewNoiseMap(seed, octaves, exponent)
 
