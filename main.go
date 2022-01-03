@@ -10,8 +10,8 @@ import (
 	"gommo/engine/render"
 	"gommo/engine/tilemap"
 	_ "image/png"
+	"math"
 	"os"
-	"time"
 )
 
 func main() {
@@ -36,12 +36,13 @@ const (
 	waterPng         = "water.png"
 	sandPng          = "sand.png"
 	grassPng         = "grass.png"
-	tileSize         = 256
-	mapSize          = 100
-	exponent         = 1.0
+	tileSize         = 16
+	mapSize          = 1000
+	exponent         = 0.8
+	islandExponent   = 2.0
 )
 
-var seed = time.Now().UTC().UnixNano()
+var seed = int64(12345)
 
 var load *asset.Load
 var window *pixelgl.Window
@@ -93,7 +94,14 @@ func gameLoop(camera *render.Camera, zoomSpeed float64, people []Person, tmap *t
 }
 
 func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
-	terrain := proceduralgeneration.NewNoiseMap(seed, exponent)
+	octaves := []proceduralgeneration.Octave{
+		{0.02, 0.6},
+		{0.05, 0.3},
+		{0.1, 0.07},
+		{0.2, 0.02},
+		{0.4, 0.01},
+	}
+	terrain := proceduralgeneration.NewNoiseMap(seed, octaves, exponent)
 
 	tiles := make([][]tilemap.Tile, mapSize)
 	for x := range tiles {
@@ -101,9 +109,11 @@ func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
 		for y := range tiles[x] {
 			height := terrain.Get(x, y)
 
+			height = modifyHeightForIsland(height, x, y)
+
 			var tileType tilemap.TileType
 			const waterLevel = 0.5
-			const sandLevel = waterLevel + .1
+			const sandLevel = waterLevel + 0.1
 			if height < waterLevel {
 				tileType = WaterTile
 			} else if height < sandLevel {
@@ -120,6 +130,15 @@ func createTileMap(spritesheet *asset.Spritesheet) *tilemap.Tilemap {
 	tmap := tilemap.New(tiles, batch, tileSize)
 	tmap.Rebatch()
 	return tmap
+}
+
+func modifyHeightForIsland(height float64, x int, y int) float64 {
+	dx := float64(x)/float64(mapSize) - 0.5
+	dy := float64(y)/float64(mapSize) - 0.5
+	d := math.Sqrt(dx*dx+dy*dy) * 2
+	d = math.Pow(d, islandExponent)
+	height = (1 - d + height) / 2
+	return height
 }
 
 func createCamera() (*render.Camera, float64) {
