@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	mmo "gommo"
+	"gommo/engine/ecs"
 	"log"
 	"net"
 	"net/http"
@@ -12,6 +14,17 @@ import (
 )
 
 func main() {
+	// Load Game
+	engine := ecs.NewEngine()
+	_, _, _ = mmo.LoadGame(engine)
+
+	physicsSystems := mmo.CreatePhysicsSystems(engine)
+
+	quit := ecs.Signal{}
+	quit.Set(false)
+
+	go ecs.RunGame([]ecs.System{}, physicsSystems, []ecs.System{}, &quit)
+
 	listener, err := net.Listen("tcp", ":8000")
 	if err != nil {
 		panic(err)
@@ -39,6 +52,8 @@ func main() {
 	case sig := <-sigs:
 		log.Println("Terminating:", sig)
 	}
+
+	quit.Set(true)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

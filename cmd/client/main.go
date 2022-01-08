@@ -9,26 +9,25 @@ import (
 	mmo "gommo"
 	"gommo/engine/asset"
 	"gommo/engine/ecs"
+	"gommo/engine/physics"
 	"gommo/engine/render"
 	"gommo/engine/tilemap"
 	_ "image/png"
 	"log"
+	"net"
 	"nhooyr.io/websocket"
 	"os"
 	"time"
 )
 
 func main() {
-	url := "ws://localhost:8000"
-	ctx := context.Background()
-	c, resp, err := websocket.Dial(ctx, url, nil)
-	check(err)
+	conn := createConnection()
+	go sendCounterToServer(conn)
+	pixelgl.Run(runGame)
+}
 
-	log.Println("Connection Response:", resp)
-
-	conn := websocket.NetConn(ctx, c, websocket.MessageBinary)
-
-	go func() {
+func sendCounterToServer(conn net.Conn) {
+	func() {
 		counter := byte(0)
 		for {
 			time.Sleep(1 * time.Second)
@@ -42,8 +41,18 @@ func main() {
 			counter++
 		}
 	}()
+}
 
-	pixelgl.Run(runGame)
+func createConnection() net.Conn {
+	url := "ws://localhost:8000"
+	ctx := context.Background()
+	c, resp, err := websocket.Dial(ctx, url, nil)
+	check(err)
+
+	log.Println("Connection Response:", resp)
+
+	conn := websocket.NetConn(ctx, c, websocket.MessageBinary)
+	return conn
 }
 
 func check(err error) {
@@ -60,17 +69,13 @@ const (
 	windowsResizable = true
 	purpleGemPng     = "purple.png"
 	redGemPng        = "red.png"
-	packedJson       = "packed.json"
 	waterPng         = "water.png"
 	sandPng          = "sand.png"
 	grassPng         = "grass.png"
-	tileSize         = 16
-	mapSize          = 1000
 )
 
-var seed = int64(12345)
-
 var load *asset.Load
+var spritesheet *asset.Spritesheet
 var window *pixelgl.Window
 var engine *ecs.Engine
 var playerId ecs.Id
@@ -81,49 +86,64 @@ func runGame() {
 }
 
 func runGameLoop() {
-	spritesheet, err := load.Spritesheet(packedJson)
-	check(err)
-	tmap := createTileMap(spritesheet)
-	spawnPoint := createSpawnPoint()
-	createPeople(spritesheet, spawnPoint)
+	tmap, purpleGemId, redGemId := mmo.LoadGame(engine)
+	playerId = purpleGemId
+	createPeople(spritesheet, purpleGemId, redGemId)
+	tmapRenderer := createTileMapRender(tmap)
+	gameLoop(tmapRenderer)
+}
+
+func gameLoop(tmapRender *render.TilemapRender) {
 	camera, zoomSpeed := createCamera()
-	gameLoop(camera, zoomSpeed, tmap)
-}
+	quit := ecs.Signal{}
+	quit.Set(false)
 
-func createSpawnPoint() Transform {
-	return Transform{float64((tileSize * mapSize) / 2), float64((tileSize * mapSize) / 2)}
-}
+	inputSystems := []ecs.System{
+		{"Clear", func(dt time.Duration) {
+			window.Clear(pixel.RGB(0, 0, 0))
 
-func gameLoop(camera *render.Camera, zoomSpeed float64, tmapRender *render.TilemapRender) {
-	for !window.JustPressed(pixelgl.KeyEscape) {
-		window.Clear(pixel.RGB(0, 0, 0))
+			scroll := window.MouseScroll()
+			if scroll.Y != 0 {
+				camera.Zoom += zoomSpeed * scroll.Y
+			}
 
-		scroll := window.MouseScroll()
-		if scroll.Y != 0 {
-			camera.Zoom += zoomSpeed * scroll.Y
-		}
-
-		HandleInput(window, engine)
-
-		transform := Transform{}
-		ok := ecs.Read(engine, playerId, &transform)
-		if ok {
-			camera.Position = pixel.V(transform.X, transform.Y)
-		}
-		camera.Update()
-
-		window.SetMatrix(camera.Matrix())
-		tmapRender.Draw(window)
-
-		DrawSprite(window, engine)
-
-		window.SetMatrix(pixel.IM)
-
-		window.Update()
+			if window.JustPressed(pixelgl.KeyEscape) {
+				quit.Set(true)
+			}
+		}},
+		{"CaptureInput", func(dt time.Duration) {
+			render.CaptureInput(window, engine)
+		}},
 	}
+
+	physicsSystems := mmo.CreatePhysicsSystems(engine)
+
+	renderSystems := []ecs.System{
+		{"UpdateCamera", func(dt time.Duration) {
+			transform := physics.Transform{}
+			ok := ecs.Read(engine, playerId, &transform)
+			if ok {
+				camera.Position = pixel.V(transform.X, transform.Y)
+			}
+			camera.Update()
+		}},
+		{"Draw", func(dt time.Duration) {
+			window.SetMatrix(camera.Matrix())
+			tmapRender.Draw(window)
+
+			render.DrawSprites(window, engine)
+
+			window.SetMatrix(pixel.IM)
+		}},
+		{"UpdateWindow", func(dt time.Duration) {
+			window.Update()
+		}},
+	}
+
+	ecs.RunGame(inputSystems, physicsSystems, renderSystems, &quit)
 }
 
-func createTileMap(spritesheet *asset.Spritesheet) *render.TilemapRender {
+func createTileMapRender(tmap *tilemap.Tilemap) *render.TilemapRender {
 	grassTile, err := spritesheet.Get(grassPng)
 	check(err)
 	sandTile, err := spritesheet.Get(sandPng)
@@ -131,7 +151,6 @@ func createTileMap(spritesheet *asset.Spritesheet) *render.TilemapRender {
 	waterTile, err := spritesheet.Get(waterPng)
 	check(err)
 
-	tmap := mmo.CreateTilemap(seed, mapSize, tileSize)
 	tmapRender := render.NewTilemapRender(spritesheet, map[tilemap.TileType]*pixel.Sprite{
 		mmo.GrassTile: grassTile,
 		mmo.SandTile:  sandTile,
@@ -147,27 +166,20 @@ func createCamera() (*render.Camera, float64) {
 	return camera, zoomSpeed
 }
 
-func createPeople(spritesheet *asset.Spritesheet, spawnPoint Transform) {
-	var purpleGemSprite, err = spritesheet.Get(purpleGemPng)
+func createPeople(spritesheet *asset.Spritesheet, purpleGemId ecs.Id, redGemId ecs.Id) {
+	purpleGemSprite, err := spritesheet.Get(purpleGemPng)
 	check(err)
+	ecs.Write(engine, purpleGemId, render.Sprite{Sprite: purpleGemSprite})
+	ecs.Write(engine, purpleGemId, render.AWSDKeybinds)
+
 	redGemSprite, err := spritesheet.Get(redGemPng)
 	check(err)
-
-	purpleGemId := engine.NewId()
-	ecs.Write(engine, purpleGemId, Sprite{purpleGemSprite})
-	ecs.Write(engine, purpleGemId, spawnPoint)
-	ecs.Write(engine, purpleGemId, AWSDKeybinds)
-
-	playerId = purpleGemId
-
-	redGemId := engine.NewId()
-	ecs.Write(engine, redGemId, Sprite{redGemSprite})
-	ecs.Write(engine, redGemId, spawnPoint)
-	ecs.Write(engine, redGemId, ArrowKeybinds)
+	ecs.Write(engine, redGemId, render.Sprite{Sprite: redGemSprite})
+	ecs.Write(engine, redGemId, render.ArrowKeybinds)
 }
 
 func setupGame() {
-	setupLoad()
+	setupAssets()
 	setupEngine()
 	setupWindow()
 }
@@ -176,8 +188,11 @@ func setupEngine() {
 	engine = ecs.NewEngine()
 }
 
-func setupLoad() {
+func setupAssets() {
 	load = asset.NewLoad(os.DirFS("./"))
+	var err error
+	spritesheet, err = load.Spritesheet("packed.json")
+	check(err)
 }
 
 func setupWindow() {
@@ -198,46 +213,4 @@ func getWindowsConfig() pixelgl.WindowConfig {
 		Resizable: windowsResizable,
 	}
 	return cfg
-}
-
-func DrawSprite(window *pixelgl.Window, engine *ecs.Engine) {
-	ecs.Each(engine, Sprite{}, func(id ecs.Id, a interface{}) {
-		sprite := a.(Sprite)
-
-		transform := Transform{}
-		ok := ecs.Read(engine, id, &transform)
-		if !ok {
-			return
-		}
-
-		position := pixel.V(transform.X, transform.Y)
-		sprite.Draw(window, pixel.IM.Scaled(pixel.ZV, 2.0).Moved(position))
-	})
-}
-
-func HandleInput(window *pixelgl.Window, engine *ecs.Engine) {
-	ecs.Each(engine, Keybinds{}, func(id ecs.Id, a interface{}) {
-		keybinds := a.(Keybinds)
-
-		transform := Transform{}
-		ok := ecs.Read(engine, id, &transform)
-		if !ok {
-			return
-		}
-
-		if window.Pressed(keybinds.Left) {
-			transform.X -= 2.0
-		}
-		if window.Pressed(keybinds.Right) {
-			transform.X += 2.0
-		}
-		if window.Pressed(keybinds.Up) {
-			transform.Y += 2.0
-		}
-		if window.Pressed(keybinds.Down) {
-			transform.Y -= 2.0
-		}
-
-		ecs.Write(engine, id, transform)
-	})
 }
