@@ -97,9 +97,13 @@ func modifyHeightForIsland(mapSize int, height float64, x int, y int) float64 {
 
 func CreatePhysicsSystems(engine *ecs.Engine) []ecs.System {
 	physicsSystems := []ecs.System{
-		{Name: "HandleInput", Func: func(dt time.Duration) {
-			physics.HandleInput(engine)
-		}},
+		{Name: "HandleInput", Func: handleInputFunc(engine)},
 	}
 	return physicsSystems
+}
+
+func handleInputFunc(engine *ecs.Engine) func(dt time.Duration) {
+	return func(dt time.Duration) {
+		physics.HandleInput(engine)
+	}
 }

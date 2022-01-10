@@ -72,6 +72,7 @@ const (
 	waterPng         = "water.png"
 	sandPng          = "sand.png"
 	grassPng         = "grass.png"
+	packedJson       = "packed.json"
 )
 
 var load *asset.Load
@@ -98,49 +99,85 @@ func gameLoop(tmapRender *render.TilemapRender) {
 	quit := ecs.Signal{}
 	quit.Set(false)
 
-	inputSystems := []ecs.System{
-		{"Clear", func(dt time.Duration) {
-			window.Clear(pixel.RGB(0, 0, 0))
-
-			scroll := window.MouseScroll()
-			if scroll.Y != 0 {
-				camera.Zoom += zoomSpeed * scroll.Y
-			}
-
-			if window.JustPressed(pixelgl.KeyEscape) {
-				quit.Set(true)
-			}
-		}},
-		{"CaptureInput", func(dt time.Duration) {
-			render.CaptureInput(window, engine)
-		}},
-	}
-
+	inputSystems := createInputSystems(camera, zoomSpeed, &quit)
 	physicsSystems := mmo.CreatePhysicsSystems(engine)
-
-	renderSystems := []ecs.System{
-		{"UpdateCamera", func(dt time.Duration) {
-			transform := physics.Transform{}
-			ok := ecs.Read(engine, playerId, &transform)
-			if ok {
-				camera.Position = pixel.V(transform.X, transform.Y)
-			}
-			camera.Update()
-		}},
-		{"Draw", func(dt time.Duration) {
-			window.SetMatrix(camera.Matrix())
-			tmapRender.Draw(window)
-
-			render.DrawSprites(window, engine)
-
-			window.SetMatrix(pixel.IM)
-		}},
-		{"UpdateWindow", func(dt time.Duration) {
-			window.Update()
-		}},
-	}
+	renderSystems := createRenderSystems(tmapRender, camera)
 
 	ecs.RunGame(inputSystems, physicsSystems, renderSystems, &quit)
+}
+
+func createInputSystems(camera *render.Camera, zoomSpeed float64, quit *ecs.Signal) []ecs.System {
+	return []ecs.System{
+		{Name: "UpdateCameraZoom", Func: updateCameraZoomFunc(camera, zoomSpeed)},
+		{Name: "exitGame", Func: exitGameFunc(quit)},
+		{Name: "Clear", Func: clearFunc()},
+		{Name: "CaptureInput", Func: captureInputFunc()},
+	}
+}
+
+func clearFunc() func(dt time.Duration) {
+	return func(dt time.Duration) {
+		window.Clear(pixel.RGB(0, 0, 0))
+	}
+}
+
+func exitGameFunc(quit *ecs.Signal) func(dt time.Duration) {
+	return func(dt time.Duration) {
+		if window.JustPressed(pixelgl.KeyEscape) {
+			quit.Set(true)
+		}
+	}
+}
+
+func updateCameraZoomFunc(camera *render.Camera, zoomSpeed float64) func(dt time.Duration) {
+	return func(dt time.Duration) {
+		scroll := window.MouseScroll()
+		if scroll.Y != 0 {
+			camera.Zoom += zoomSpeed * scroll.Y
+		}
+	}
+}
+
+func createRenderSystems(tmapRender *render.TilemapRender, camera *render.Camera) []ecs.System {
+	return []ecs.System{
+		{Name: "UpdateCamera", Func: updateCameraFunc(camera)},
+		{Name: "Draw", Func: drawFunc(tmapRender, camera)},
+		{Name: "UpdateWindow", Func: updateWindowFunc()},
+	}
+}
+
+func updateCameraFunc(camera *render.Camera) func(dt time.Duration) {
+	return func(dt time.Duration) {
+		transform := physics.Transform{}
+		ok := ecs.Read(engine, playerId, &transform)
+		if ok {
+			camera.Position = pixel.V(transform.X, transform.Y)
+		}
+		camera.Update()
+	}
+}
+
+func drawFunc(tmapRender *render.TilemapRender, camera *render.Camera) func(dt time.Duration) {
+	return func(dt time.Duration) {
+		window.SetMatrix(camera.Matrix())
+		tmapRender.Draw(window)
+
+		render.DrawSprites(window, engine)
+
+		window.SetMatrix(pixel.IM)
+	}
+}
+
+func updateWindowFunc() func(dt time.Duration) {
+	return func(dt time.Duration) {
+		window.Update()
+	}
+}
+
+func captureInputFunc() func(dt time.Duration) {
+	return func(dt time.Duration) {
+		render.CaptureInput(window, engine)
+	}
 }
 
 func createTileMapRender(tmap *tilemap.Tilemap) *render.TilemapRender {
@@ -191,7 +228,7 @@ func setupEngine() {
 func setupAssets() {
 	load = asset.NewLoad(os.DirFS("./"))
 	var err error
-	spritesheet, err = load.Spritesheet("packed.json")
+	spritesheet, err = load.Spritesheet(packedJson)
 	check(err)
 }
 
